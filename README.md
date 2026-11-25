@@ -1,0 +1,1 @@
+# shinko_dai_progress
