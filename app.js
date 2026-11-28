@@ -78,13 +78,57 @@ const R = {
   mdw(d) { return `${d.getMonth() + 1}/${d.getDate()}(${R.week[d.getDay()]})`; },
   isComplete(m) { return Array.isArray(m.Done) && m.Done.includes(R.DONE); },
 
+  // 見積あり：打診→先方受諾→見積取得→制作依頼→経理送付→納品→（先行）先行支払依頼→OZ起票依頼→（先行）先行支払処理済
+  // 見積なし：打診→先方受諾→制作依頼→納品→（先行）先行支払依頼→OZ起票依頼→（先行）先行支払処理済
+  // キー mit・kei・oz・sen は以前と同じ（完了状態を引き継ぐ）
   commissionStages(c) {
-    const list = [];
-    if (c.HasEstimate) { list.push(['mit', '見積取得'], ['kei', '経理送付']); }
+    const adv = c.Pay !== 1;
+    const list = [['dashin', '打診'], ['jutaku', '先方受諾']];
+    if (c.HasEstimate) list.push(['mit', '見積取得']);
+    list.push(['irai', '制作依頼']);
+    if (c.HasEstimate) list.push(['kei', '経理送付']);
+    list.push(['nohin', '納品']);
+    if (adv) list.push(['senirai', '先行支払依頼']);
     list.push(['oz', 'OZ起票依頼']);
-    if (c.Pay !== 1) list.push(['sen', '先行支払処理済']);
+    if (adv) list.push(['sen', '先行支払処理済']);
     return list;
   },
+
+  // 目安日付（初稿送付＝発売日の19日前、校了＝6日前）。入稿締切が自動計算のときだけ自動で出す
+  TARGET_FIRST: 19, TARGET_CLOSE: 6,
+  hasTarget(i) { return i === R.FIRST_SEND || i === R.DONE; },
+  targetField(i) { return i === R.FIRST_SEND ? 'TargetFirstDraft' : 'TargetClosing'; },
+  autoTarget(m, i) {
+    const rel = R.parseDate(m.ReleaseDate);
+    if (!rel || R.parseDate(m.DeadlineManual) || !R.autoDeadline(rel, m.Kotei)) return null;
+    if (i === R.FIRST_SEND) return R.addDays(rel, -R.TARGET_FIRST);
+    if (i === R.DONE) return R.addDays(rel, -R.TARGET_CLOSE);
+    return null;
+  },
+  target(m, i) {
+    if (!R.hasTarget(i)) return null;
+    return R.parseDate(m[R.targetField(i)]) || R.autoTarget(m, i);
+  },
+  // 初稿送付の注意：0＝なし、1＝目安の2日前〜当日で未完了、2＝目安を過ぎても未完了（目安がない・完成済みは0）
+  ALERT_DAYS: 2,
+  today() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); },
+  daysBetween(a, b) { return Math.round((b.getTime() - a.getTime()) / 86400000); },
+  firstDraftAlert(m, today) {
+    if (R.isComplete(m) || (Array.isArray(m.Done) && m.Done.includes(R.FIRST_SEND))) return 0;
+    const t = R.target(m, R.FIRST_SEND);
+    if (!t) return 0;
+    const d = R.daysBetween(today, t);
+    if (d < 0) return 2;
+    return d <= R.ALERT_DAYS ? 1 : 0;
+  },
+  firstDraftAlertText(m, today) {
+    const t = R.target(m, R.FIRST_SEND);
+    if (!t) return '';
+    const d = R.daysBetween(today, t);
+    const head = '初稿送付 目安' + R.mmdd(t);
+    return d > 0 ? `${head}まで あと${d}日` : d === 0 ? `${head} 今日` : `${head}から ${-d}日超過`;
+  },
+  mmdd(d) { const p = (n) => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}/${p(d.getDate())}`; },
 
   // 区分の完了・未完了を切り替える（14を戻すと15も戻る、15は14のあと）
   toggle(m, i) {
@@ -434,9 +478,11 @@ if (typeof window !== 'undefined') {
       for (const m of items) {
         const dl = R.deadline(m), rel = R.parseDate(m.ReleaseDate);
         const done = R.isComplete(m);
+        const al = R.firstDraftAlert(m, R.today());
         side.appendChild(h('button', { class: 'row' + (m.Id === S.selId ? ' sel' : '') + (done ? ' done' : ''), onclick: () => { S.selId = m.Id; renderLists(); } },
           h('span', { class: 'rn', text: (m.PropertyName || '（物件名なし）') + (done ? '　✓ 完成' : '') }),
-          h('span', { class: 'rs', text: `${rel ? R.mdw(rel) + '発売' : ''}　締切 ${dl ? R.mdw(dl) : '要入力'}　${m.Done.length}/15` })));
+          h('span', { class: 'rs', text: `${rel ? R.mdw(rel) + '発売' : ''}　締切 ${dl ? R.mdw(dl) : '要入力'}　${m.Done.length}/15` }),
+          al ? h('span', { class: 'chip chip-alert' + (al === 2 ? ' over' : ''), text: '⚠ ' + R.firstDraftAlertText(m, R.today()) }) : null));
       }
       const sel = items.find((m) => m.Id === S.selId);
       const pane = h('section', { class: 'pane' }, sel ? card(sel, true, true) : h('div', { class: 'empty', text: '表示する原稿がありません。' }));
@@ -449,11 +495,13 @@ if (typeof window !== 'undefined') {
       const dl = R.deadline(m);
       const next = R.names.findIndex((n, i) => !m.Done.includes(i));
       const allows = R.allowsCommission(m.Kotei);
+      const alert = R.firstDraftAlert(m, R.today());
 
       const chips = h('div', { class: 'chips' },
         h('span', { class: 'chip chip-rel', text: (rel ? (wide ? '発売日 ' + R.jpw(rel) : R.mdw(rel) + ' 発売') : '発売日なし') }),
         h('span', { class: 'chip chip-dl' + (dl ? '' : ' need'), text: dl ? (wide ? '入稿締切 ' + R.jpw(dl) : '締切 ' + R.mdw(dl)) : '締切 要入力' }),
         m.Kubun ? h('span', { class: 'chip chip-kubun', text: m.Kubun }) : null,
+        alert ? h('span', { class: 'chip chip-alert' + (alert === 2 ? ' over' : ''), text: '⚠ ' + R.firstDraftAlertText(m, R.today()) }) : null,
         done ? h('span', { class: 'chip chip-done', text: '✓ 完成' }) : null,
         done && allows && m.Commissions.some((c) => c.Pay === 1) ? h('span', { class: 'chip chip-doji', text: '二次委託同時支払あり' }) : null);
 
@@ -471,9 +519,15 @@ if (typeof window !== 'undefined') {
 
       const detail = h('div', { class: 'detail' });
       const dd = R.deleteDate(m);
-      detail.appendChild(h('div', { class: 'info', text:
-        `${m.Company || '—'}　／　営業 ${m.Sales || '—'}　／　${m.Kotei || '工程なし'}\nPJ ${m.PjCode || '—'}　依頼ID ${m.RequestId || '—'}\n企画 ${m.Plan || '—'}` +
-        (done && dd ? `\n${R.md(dd)}にPCが削除します` : ''), style: 'white-space:pre-line' }));
+      // 原稿の情報（押すとコピー）
+      const info = h('div', { class: 'cps' });
+      [['物件名', m.PropertyName], ['会社名', m.Company], ['PJコード', m.PjCode], ['制作依頼ID', m.RequestId],
+       ['営業名', m.Sales], ['工程', m.Kotei], ['企画', m.Plan]].forEach(([label, v]) => {
+        if (!v) return;
+        info.appendChild(h('button', { class: 'cp', onclick: () => copyText(v) }, h('span', { class: 'cl', text: label }), h('span', { class: 'cv', text: v })));
+      });
+      detail.appendChild(info);
+      if (done && dd) detail.appendChild(h('div', { class: 'info', text: `${R.md(dd)}にPCが削除します` }));
 
       // リンク
       const links = h('div', { class: 'links' });
@@ -492,8 +546,11 @@ if (typeof window !== 'undefined') {
         if (i === R.FIRST_SEND && R.parseDate(m.FirstDraftSent)) sub = R.md(R.parseDate(m.FirstDraftSent)) + ' 送付';
         if (i === R.FIRST_CB && R.parseDate(m.FirstCbDue)) sub = '締切 ' + R.md(R.parseDate(m.FirstCbDue));
         const memo = m.Memos[String(i)];
-        const btn = h('button', { class: 'st' + (on ? ' on' : '') + (lock ? ' lock' : ''), 'aria-pressed': String(on) },
+        const tg = !on && R.hasTarget(i) ? R.target(m, i) : null;
+        const al = i === R.FIRST_SEND ? alert : 0;
+        const btn = h('button', { class: 'st' + (on ? ' on' : '') + (lock ? ' lock' : '') + (al ? ' alert' : '') + (al === 2 ? ' over' : ''), 'aria-pressed': String(on) },
           h('span', { class: 'no', text: String(i + 1) }), h('span', { class: 'nm', text: n }), h('span', { class: 'sb', text: sub }),
+          tg ? h('span', { class: 'tg', text: R.mmdd(tg) }) : null,
           memo ? h('span', { class: 'md' }) : null);
         pressable(btn,
           () => {
@@ -543,8 +600,9 @@ if (typeof window !== 'undefined') {
       detail.appendChild(h('div', { class: 'actions' },
         h('button', { class: 'a-rel', onclick: () => sheetRelease(m) }, '発売日を変更'),
         h('button', { class: 'a-dl', onclick: () => sheetDeadline(m) }, '締切を変更'),
+        h('button', { class: 'a-tg', onclick: () => sheetTarget(m) }, '目安日付'),
         h('button', { onclick: () => sheetMemo(m, null) }, 'メモを書く')));
-      detail.appendChild(h('div', { class: 'hint', text: '区分を押すと完了／未完了。長押しでその区分のメモ。' }));
+      detail.appendChild(h('div', { class: 'hint', text: '区分を押すと完了／未完了。長押しでその区分のメモ。原稿の情報は押すとコピー。赤い日付は目安。' }));
       el.appendChild(detail);
       return el;
     }
@@ -677,6 +735,51 @@ if (typeof window !== 'undefined') {
         [['閉じる', '', (c) => c()],
          ['日付だけ保存', '', (c) => { c(); change(m.Id, (x) => { apply(x); return true; }, '日付を保存しました'); }],
          [done ? '未完了に戻す' : '送付済みにする', 'btn-primary', (c) => { c(); change(m.Id, (x) => { apply(x); return R.toggle(x, R.FIRST_SEND); }); }]]);
+    }
+
+    // 目安日付（初稿送付・校了）
+    function sheetTarget(m) {
+      const rows = [R.FIRST_SEND, R.DONE].map((i) => {
+        const inp = dateInput(R.target(m, i));
+        const auto = R.autoTarget(m, i);
+        const hint = auto ? `自動：発売日の${i === R.FIRST_SEND ? R.TARGET_FIRST : R.TARGET_CLOSE}日前（${R.jpw(auto)}）` : '入稿締切が手入力のため、目安日付も手入力です';
+        return { i, inp, auto, el: h('label', {}, `${i + 1} ${R.names[i]}`, inp, h('span', { class: 'hint', text: hint })) };
+      });
+      sheet('目安日付', m.PropertyName,
+        h('div', { style: 'display:flex;flex-direction:column;gap:12px' }, rows.map((r) => r.el),
+          h('div', { class: 'hint', text: '空欄にして保存すると、自動の目安に戻ります（自動がない原稿では消えます）。' })),
+        [['閉じる', '', (c) => c()],
+         ['保存', 'btn-primary', (c) => {
+           const vals = rows.map((r) => ({ i: r.i, d: R.fromInput(r.inp.value) }));
+           c();
+           change(m.Id, (x) => {
+             vals.forEach(({ i, d }) => {
+               const a = R.autoTarget(x, i);
+               x[R.targetField(i)] = d && !(a && R.toDateStr(a) === R.toDateStr(d)) ? R.toDateStr(d) : null;
+             });
+             return true;
+           }, '目安日付を保存しました');
+         }]]);
+    }
+
+    // 押した文字をコピー
+    async function copyText(v) {
+      try {
+        await navigator.clipboard.writeText(v);
+        toast('コピーしました：' + (v.length > 24 ? v.slice(0, 24) + '…' : v));
+      } catch (e) {
+        try {
+          const ta = h('textarea', {});
+          ta.value = v;
+          ta.setAttribute('readonly', '');
+          ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          toast(ok ? 'コピーしました' : 'コピーできませんでした');
+        } catch (e2) { toast('コピーできませんでした'); }
+      }
     }
 
     // ---------- 起動 ----------

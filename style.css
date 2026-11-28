@@ -68,13 +68,25 @@ button { cursor: pointer; }
 .st.ex { border-color: #8E7CC3; }
 .st.ex.on { background: var(--purple); border-color: var(--purple); color: #fff; }
 .st .md { position: absolute; top: 4px; right: 4px; width: 9px; height: 9px; border-radius: 5px; background: var(--orange); border: 2px solid #fff; }
+.st.alert { border: 2.5px solid var(--red); }
+.st.alert.over { background: #FCE1DE; }
+.chip-alert { background: #FDECEA; color: var(--red); font-weight: 700; }
+.chip-alert.over { background: var(--red); color: #fff; }
+.row .chip-alert { align-self: flex-start; }
+.st .tg { position: absolute; right: 5px; bottom: 4px; font-size: 10px; font-weight: 700; color: var(--red); opacity: .7; }
+.cps { display: flex; flex-wrap: wrap; gap: 6px; }
+.cp { border: 1px solid #DDE1E6; background: #F7F8FA; border-radius: 8px; padding: 5px 9px; text-align: left; display: flex; flex-direction: column; gap: 1px; max-width: 100%; }
+.cp .cl { font-size: 10px; color: var(--sub); }
+.cp .cv { font-size: 13px; word-break: break-all; }
+.cp:active { background: var(--blue-l); }
 .niji-t { font-size: 12px; font-weight: 700; color: var(--purple-d); }
 .memos { background: #FFF8F1; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
 .memos b { font-size: 11px; color: var(--brown); }
 .memos span { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
-.actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .actions button { height: 40px; border-radius: 8px; font-size: 13px; border: 1px solid var(--line); background: #fff; }
 .a-rel { border-color: #B9CCEA !important; background: var(--blue-l) !important; color: var(--blue-d); }
+.a-tg { border-color: #F0B4AE !important; background: #FDF1F0 !important; color: var(--red); }
 .a-dl { border-color: #F0C9A0 !important; background: var(--orange-l) !important; color: var(--brown); }
 .hint { font-size: 11px; color: var(--sub); }
 .warn { font-size: 12px; color: #8A3F00; font-weight: 700; }
@@ -98,6 +110,7 @@ button { cursor: pointer; }
   .pane .grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
   .pane .name { font-size: 22px; white-space: normal; }
   .pane .detail { border-top: 0; }
+  .actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* 下から出る画面 */
